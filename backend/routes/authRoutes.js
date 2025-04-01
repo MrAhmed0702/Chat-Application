@@ -1,6 +1,7 @@
 const express = require('express');
-const { registerUser, loginUser, upload } = require('../controllers/authController');
+const { registerUser, loginUser, updateProfile, upload } = require('../controllers/authController'); // Add updateProfile here
 const { body } = require('express-validator');
+const authMiddleware = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
@@ -23,6 +24,18 @@ router.post(
         body('password').notEmpty().withMessage('Password is required'),
     ],
     loginUser
+);
+
+router.put(
+    '/profile',
+    authMiddleware,
+    [
+        body('name').optional().notEmpty().withMessage('Name cannot be empty'),
+        body('email').optional().isEmail().withMessage('Valid email is required'),
+        body('phone').optional().isMobilePhone().withMessage('Valid phone number is required'),
+    ],
+    upload.single('profilePic'),
+    updateProfile
 );
 
 module.exports = router;
