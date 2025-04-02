@@ -10,6 +10,7 @@ const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken'); // For Socket.IO auth
 const User = require('./models/User'); 
 const Message = require('./models/Message');
+const Room = require('./models/Room');
 
 dotenv.config();
 
@@ -69,26 +70,84 @@ io.on('connection', (socket) => {
         console.log(`User ${socket.user.name} joined DM room: ${room}`);
     });
 
-    // Handle sending a message
-    socket.on('sendMessage', async ({ receiverId, content }) => {
+     // Join a group chat room
+     socket.on('joinRoom', ({ roomId }) => {
+        socket.join(roomId);
+        console.log(`User ${socket.user.name} joined room: ${roomId}`);
+    });
+
+    // Handle sending a message (DM or group)
+    socket.on('sendMessage', async ({ receiverId, roomId, content }) => {
         try {
             const senderId = socket.user._id.toString();
-            const room = [senderId, receiverId].sort().join('_');
-            const message = {
-                sender: senderId,
-                receiver: receiverId,
-                content,
-                timestamp: new Date(),
-            };
+            let message;
 
-            const newMessage = await Message.create(message);
-            const populatedMessage = await Message.findById(newMessage._id)
-                .populate('sender', 'name profilePic')
-                .populate('receiver', 'name profilePic');
-
-            io.to(room).emit('receiveMessage', populatedMessage);
+            if (roomId) {
+                // Group message
+                message = { sender: senderId, room: roomId, content, timestamp: new Date() };
+                const room = await Room.findById(roomId);
+                if (!room || !room.members.includes(senderId)) {
+                    throw new Error('User not in room');
+                }
+                const newMessage = await Message.create(message);
+                const populatedMessage = await Message.findById(newMessage._id)
+                    .populate('sender', 'name profilePic');
+                io.to(roomId).emit('receiveMessage', populatedMessage);
+            } else if (receiverId) {
+                // DM message
+                const room = [senderId, receiverId].sort().join('_');
+                message = { sender: senderId, receiver: receiverId, content, timestamp: new Date() };
+                const newMessage = await Message.create(message);
+                const populatedMessage = await Message.findById(newMessage._id)
+                    .populate('sender', 'name profilePic')
+                    .populate('receiver', 'name profilePic');
+                io.to(room).emit('receiveMessage', populatedMessage);
+            } else {
+                throw new Error('Must specify receiverId or roomId');
+            }
         } catch (error) {
             console.error('Error sending message:', error);
+        }
+    });
+
+    socket.on('markMessageRead', async ({ messageId, roomId }) => {
+        try {
+            const message = await Message.findById(messageId);
+            if (!message || (message.receiver && message.receiver.toString() !== socket.user._id.toString())) {
+                return;
+            }
+            message.read = true;
+            await message.save();
+            const populatedMessage = await Message.findById(messageId)
+                .populate('sender', 'name profilePic')
+                .populate('receiver', 'name profilePic');
+            if (roomId) {
+                io.to(roomId).emit('messageRead', populatedMessage);
+            } else {
+                const room = [socket.user._id.toString(), message.sender.toString()].sort().join('_');
+                io.to(room).emit('messageRead', populatedMessage);
+            }
+        } catch (error) {
+            console.error('Error marking message as read:', error);
+        }
+    });
+
+     // Typing indicator
+     socket.on('typing', ({ receiverId, roomId }) => {
+        if (roomId) {
+            socket.to(roomId).emit('typing', { userId: socket.user._id, name: socket.user.name });
+        } else if (receiverId) {
+            const room = [socket.user._id.toString(), receiverId].sort().join('_');
+            socket.to(room).emit('typing', { userId: socket.user._id, name: socket.user.name });
+        }
+    });
+
+    socket.on('stopTyping', ({ receiverId, roomId }) => {
+        if (roomId) {
+            socket.to(roomId).emit('stopTyping', { userId: socket.user._id });
+        } else if (receiverId) {
+            const room = [socket.user._id.toString(), receiverId].sort().join('_');
+            socket.to(room).emit('stopTyping', { userId: socket.user._id });
         }
     });
 

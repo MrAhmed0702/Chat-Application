@@ -11,6 +11,10 @@ const messageSchema = new mongoose.Schema({
         ref: 'User',
         required: true,
     },
+    room: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Room',
+    },
     content: {
         type: String,
         required: true,
@@ -18,6 +22,10 @@ const messageSchema = new mongoose.Schema({
     timestamp: {
         type: Date,
         default: Date.now,
+    },
+    read: { 
+        type: Boolean,
+        default: false
     },
 });
 
